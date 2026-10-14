@@ -2265,6 +2265,35 @@ describe('cta', () => {
       commands: [{ command: 'test pr get 42', description: 'View the PR' }],
     })
   })
+
+  test.each([
+    // A multi-word CLI can point at a sibling command of the same program.
+    [
+      'tempo request',
+      { command: 'tempo wallet login', options: { network: 'testnet' } },
+      'tempo wallet login --network testnet',
+    ],
+    ['tempo request', 'tempo wallet login', 'tempo wallet login'],
+    ['tempo request', { command: 'tempo' }, 'tempo'],
+    // A multi-word CLI still prefixes its own subcommands.
+    ['tempo request', { command: 'list', args: { url: true } }, 'tempo request list <url>'],
+    ['tempo request', 'list', 'tempo request list'],
+    ['tempo request', { command: 'tempo request list' }, 'tempo request list'],
+    ['tempo request', { command: 'tempo request' }, 'tempo request'],
+    // A single-word CLI behaves as before, and string commands match object commands.
+    ['test', { command: 'get 1' }, 'test get 1'],
+    ['test', { command: 'test get 1' }, 'test get 1'],
+    ['test', 'test get 1', 'test get 1'],
+    ['test', { command: 'testing' }, 'test testing'],
+    ['test', { command: 'test' }, 'test'],
+  ])('%s formats %j as %s', async (name, cta, expected) => {
+    const cli = Cli.create(name)
+    cli.command('ping', { run: (c) => c.ok({ pong: true }, { cta: { commands: [cta] } }) })
+
+    const { output } = await serve(cli, ['ping', '--full-output', '--format', 'json'])
+    const parsed = JSON.parse(output)
+    expect(parsed.meta.cta.commands).toEqual([{ command: expected }])
+  })
 })
 
 describe('leaf cli', () => {

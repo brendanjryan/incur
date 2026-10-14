@@ -51,10 +51,15 @@ export function renderCtaText(block: FormattedCtaBlock): string {
   return lines.join('\n')
 }
 
-/** @internal Formats a CTA by prefixing the CLI name. */
+/**
+ * @internal Formats a CTA by prefixing the CLI name. Commands that already start with the
+ * program (the first word of the CLI name) are full command lines and are left unprefixed, so a
+ * CLI named `tempo request` can suggest `tempo wallet login`.
+ */
 function formatCta(name: string, cta: Cta): FormattedCta {
-  if (typeof cta === 'string') return { command: `${name} ${cta}` }
-  const prefix = cta.command === name || cta.command.startsWith(`${name} `) ? '' : `${name} `
+  if (typeof cta === 'string') return formatCta(name, { command: cta })
+  const [program] = name.split(' ')
+  const prefix = cta.command === program || cta.command.startsWith(`${program} `) ? '' : `${name} `
   let cmd = `${prefix}${cta.command}`
   if (cta.args)
     for (const [key, value] of Object.entries(cta.args))
