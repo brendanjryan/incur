@@ -94,6 +94,28 @@ cli.serve()
     expect(stdout.trim()).toBe('1.0.0')
   })
 
+  test('serves MCP over stdio (lazy MCP SDK import)', async () => {
+    const { stdout } = await exec(bin, ['mcp', 'doctor', '--json'])
+    expect(JSON.parse(stdout)).toMatchInlineSnapshot(`
+      {
+        "errors": [],
+        "ok": true,
+        "toolCount": 2,
+        "tools": [
+          {
+            "description": "Echo a message",
+            "name": "echo",
+          },
+          {
+            "description": "Health check",
+            "name": "ping",
+          },
+        ],
+        "warnings": [],
+      }
+    `)
+  })
+
   test('updates through a custom binary provider', async () => {
     const { stdout } = await exec(bin, ['--update'])
     expect(stdout).toContain('name: test-cli')
