@@ -679,7 +679,10 @@ describe('serve integration', () => {
       globals: z.object({ network: z.string() }),
       globalAlias: { network: 'n' },
     })
-    cli.command('build', { run: () => ({}) })
+    cli.command('build', {
+      options: z.object({ version: z.enum(['latest', 'next']).optional() }),
+      run: () => ({}),
+    })
     cli.command(Cli.create('db').command('migrate', { run: () => ({}) }))
 
     const results: Record<string, string> = {}
@@ -697,6 +700,10 @@ describe('serve integration', () => {
       // A value at the cursor
       'mycli --format j',
       'mycli --network ',
+      // `--version` is a command option when followed by a value, and the built-in flag otherwise
+      'mycli build --version ',
+      'mycli build --version n',
+      'mycli --version ',
     ]) {
       const words = line.split(' ')
       const output = await serve(cli, ['--', ...words], {
@@ -719,7 +726,10 @@ describe('serve integration', () => {
         "mycli --network testnet com": "completions",
         "mycli --network testnet skills ": "build db add list ls",
         "mycli --token-limit 5 --token-offset 10 ": "build db completions mcp skills",
+        "mycli --version ": "build db completions mcp skills",
         "mycli -n testnet com": "completions",
+        "mycli build --version ": "latest next",
+        "mycli build --version n": "next",
       }
     `)
   })

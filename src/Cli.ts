@@ -813,6 +813,9 @@ async function serveImpl(
       const before = (() => {
         try {
           const { rest } = extractBuiltinFlags(words.slice(0, index), { configFlag })
+          // A trailing `--version` is read as the built-in flag, but it may be a command option
+          // whose value is the word at the cursor
+          if (words[index - 1] === '--version') rest.push('--version')
           // No globals to drop
           if (!options.globals) return rest
           // Drop globals and their values
