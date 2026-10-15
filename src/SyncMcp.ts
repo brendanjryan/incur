@@ -91,7 +91,11 @@ export declare namespace register {
     agents?: string[] | undefined
     /** CLI name used to derive the default command. Defaults to the MCP server name. */
     cli?: string | undefined
-    /** Override the command agents will run. Defaults to `<runner> <name> --mcp`. */
+    /**
+     * Override the command agents will run. Defaults to `<name> --mcp` when the binary is on PATH
+     * or, without `package`, the name is not an npm package name (e.g. `tempo wallet`). Otherwise
+     * defaults to `<runner> <package> --mcp`.
+     */
     command?: string | undefined
     /** Install globally. Defaults to `true`. */
     global?: boolean | undefined
