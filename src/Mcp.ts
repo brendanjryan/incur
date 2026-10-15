@@ -11,11 +11,11 @@ import * as Parser from './Parser.js'
 import * as Schema from './Schema.js'
 
 /** Starts a stdio MCP server that exposes commands as tools. */
-export async function serve(
+export async function serve<const globals extends z.ZodObject<any> | undefined = undefined>(
   name: string,
   version: string,
   commands: Map<string, any>,
-  options: serve.Options = {},
+  options: serve.Options<globals> = {},
 ): Promise<void> {
   // Lazy: only runs when actually serving MCP, so plain command runs don't pay for the SDK import.
   const stdio = importStdioModule()
@@ -32,7 +32,7 @@ export async function serve(
     env: options.env,
     fromJsonSchema,
     globals: options.globals,
-    middlewares: options.middlewares,
+    middlewares: options.middlewares as MiddlewareHandler[] | undefined,
     name,
     sendNotification: (notification) => server.server.notification(notification),
     tools: options.tools,
@@ -81,15 +81,15 @@ function importStdioModule(): Promise<StdioImportResult> {
 
 export declare namespace serve {
   /** Options for the MCP server. */
-  type Options = {
+  type Options<globals extends z.ZodObject<any> | undefined = undefined> = {
     /** CLI-level env schema. */
     env?: z.ZodObject<any> | undefined
     /** CLI-level global options schema. Merged into every tool's input schema and passed to commands and middleware as `globals`. A global wins over a command option of the same name. */
-    globals?: z.ZodObject<any> | undefined
+    globals?: globals | undefined
     /** Override input stream. Defaults to `process.stdin`. */
     input?: Readable | undefined
-    /** Middleware handlers registered on the root CLI. */
-    middlewares?: MiddlewareHandler[] | undefined
+    /** Middleware handlers registered on the root CLI. Their `c.globals` is typed from `globals`. */
+    middlewares?: MiddlewareHandler<undefined, undefined, globals>[] | undefined
     /** Override output stream. Defaults to `process.stdout`. */
     output?: Writable | undefined
     /** Vars schema for middleware variables. */

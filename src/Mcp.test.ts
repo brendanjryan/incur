@@ -71,7 +71,7 @@ const initParams = {
 async function mcpSession(
   commands: Map<string, any>,
   messages: { method: string; params?: unknown; id?: number }[],
-  options: Omit<Mcp.serve.Options, 'input' | 'output'> = {},
+  options: Omit<Mcp.serve.Options<z.ZodObject<any> | undefined>, 'input' | 'output'> = {},
 ) {
   const input = new PassThrough()
   const output = new PassThrough()
@@ -1022,7 +1022,7 @@ describe('Mcp', () => {
 
 describe('globals', () => {
   type Discovery = 'direct' | 'progressive'
-  type SessionOptions = Omit<Mcp.serve.Options, 'input' | 'output'>
+  type SessionOptions = Omit<Mcp.serve.Options<z.ZodObject<any> | undefined>, 'input' | 'output'>
 
   const globals = z.object({
     network: z.enum(['mainnet', 'testnet']).default('mainnet').describe('Network to use'),
