@@ -1,4 +1,4 @@
-import { Mcp, z } from 'incur'
+import { Errors, Mcp, z } from 'incur'
 import { PassThrough } from 'node:stream'
 
 function createTestCommands() {
@@ -644,6 +644,116 @@ describe('Mcp', () => {
     expect(res.result._meta?.cta).toEqual({
       description: 'Next:',
       commands: [{ command: 'test-cli login', description: 'Sign in' }],
+    })
+  })
+
+  test('tools/call thrown IncurError keeps cta and hint like error()', async () => {
+    const options = {
+      code: 'NOT_AUTHENTICATED',
+      cta: { description: 'Next:', commands: [{ command: 'login', description: 'Sign in' }] },
+      exitCode: 4,
+      hint: 'Sign in, then retry.',
+      message: 'not signed in',
+      retryable: true,
+    }
+    const commands = new Map<string, any>()
+    commands.set('returned', { run: (c: any) => c.error(options) })
+    commands.set('thrown', {
+      run() {
+        throw new Errors.IncurError(options)
+      },
+    })
+
+    const responses = await mcpSession(commands, [
+      { id: 1, method: 'initialize', params: initParams },
+      { id: 2, method: 'tools/call', params: { name: 'returned', arguments: {} } },
+      { id: 3, method: 'tools/call', params: { name: 'thrown', arguments: {} } },
+    ])
+    const returned = responses.find((r) => r.id === 2).result
+    const thrown = responses.find((r) => r.id === 3).result
+
+    expect(thrown).toEqual(returned)
+    expect(thrown).toMatchInlineSnapshot(`
+      {
+        "_meta": {
+          "cta": {
+            "commands": [
+              {
+                "command": "test-cli login",
+                "description": "Sign in",
+              },
+            ],
+            "description": "Next:",
+          },
+          "error": {
+            "code": "NOT_AUTHENTICATED",
+            "exitCode": 4,
+            "retryable": true,
+          },
+        },
+        "content": [
+          {
+            "text": "not signed in
+      Hint: Sign in, then retry.
+
+      Next:
+        test-cli login - Sign in",
+            "type": "text",
+          },
+        ],
+        "isError": true,
+      }
+    `)
+  })
+
+  test.each([
+    {
+      name: 'error()',
+      run: (c: any) => c.error({ code: 'BOOM', message: 'it broke', retryable: true, exitCode: 3 }),
+      text: 'it broke',
+      error: { code: 'BOOM', exitCode: 3, retryable: true },
+    },
+    {
+      name: 'error() without retryable or exitCode',
+      run: (c: any) => c.error({ code: 'BOOM', message: 'it broke' }),
+      text: 'it broke',
+      error: { code: 'BOOM' },
+    },
+    {
+      name: 'thrown IncurError',
+      run() {
+        throw new Errors.IncurError({ code: 'LIMITED', message: 'too fast', exitCode: 75 })
+      },
+      text: 'too fast',
+      error: { code: 'LIMITED', exitCode: 75, retryable: false },
+    },
+    {
+      name: 'thrown IncurError mid-stream',
+      async *run() {
+        yield { step: 1 }
+        throw new Errors.IncurError({ code: 'LIMITED', message: 'too fast', retryable: true })
+      },
+      text: 'too fast',
+      error: { code: 'LIMITED', retryable: true },
+    },
+    {
+      name: 'thrown Error',
+      run() {
+        throw new Error('kaboom')
+      },
+      text: 'kaboom',
+      error: { code: 'UNKNOWN' },
+    },
+  ])('tools/call $name carries code, retryable, and exitCode in _meta', async (c) => {
+    const commands = new Map<string, any>([['fail', { run: c.run }]])
+    const [, res] = await mcpSession(commands, [
+      { id: 1, method: 'initialize', params: initParams },
+      { id: 2, method: 'tools/call', params: { name: 'fail', arguments: {} } },
+    ])
+    expect(res.result).toEqual({
+      content: [{ type: 'text', text: c.text }],
+      _meta: { error: c.error },
+      isError: true,
     })
   })
 
