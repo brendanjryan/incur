@@ -120,6 +120,7 @@ export async function callTool(
     version?: string | undefined
     middlewares?: MiddlewareHandler[] | undefined
     env?: z.ZodObject<any> | undefined
+    /** CLI-level global options schema. Its keys are split out of `params`, parsed with it, and passed to the command and middleware as `globals`. A global wins over a command option of the same name; a positional of the same name receives the value too. */
     globals?: z.ZodObject<any> | undefined
     /** Whether `params` were already parsed with the tool's merged input schema, as with direct discovery. Globals are then used as-is instead of being parsed again. */
     parsed?: boolean | undefined
