@@ -1148,6 +1148,22 @@ describe('globals', () => {
         },
       },
       {
+        name: 'passes a value shared by a positional and a global to both',
+        args: { network: 'testnet' },
+        options: {
+          commands: new Map<string, any>([
+            [
+              'deploy',
+              {
+                args: z.object({ network: z.string() }),
+                run: (c: any) => ({ args: c.args, globals: c.globals }),
+              },
+            ],
+          ]),
+        },
+        expected: { args: { network: 'testnet' }, globals: { network: 'testnet' } },
+      },
+      {
         name: 'leaves calls unchanged without globals',
         args: { force: true, network: 'testnet' },
         options: { globals: undefined },

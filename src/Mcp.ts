@@ -137,16 +137,19 @@ export async function callTool(
 
   // Globals share the tool arguments with args and options, so split them out and validate them
   // before middleware runs. As on the CLI and over HTTP, a global wins over a command option of
-  // the same name.
+  // the same name. A positional of the same name keeps the value too: the CLI reads it from its
+  // own token, but MCP has a single key for both.
   let globals: Record<string, unknown> = {}
   let inputOptions = params
   if (options.globals) {
+    const argKeys = new Set(Object.keys(tool.command.args?.shape ?? {}))
     const globalKeys = new Set(Object.keys(options.globals.shape))
     const rawGlobals: Record<string, unknown> = {}
     inputOptions = {}
-    for (const [key, value] of Object.entries(params))
+    for (const [key, value] of Object.entries(params)) {
       if (globalKeys.has(key)) rawGlobals[key] = value
-      else inputOptions[key] = value
+      if (!globalKeys.has(key) || argKeys.has(key)) inputOptions[key] = value
+    }
     try {
       globals = Parser.zodParse(options.globals, rawGlobals)
     } catch (error) {
