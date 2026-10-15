@@ -338,6 +338,16 @@ function isSentinel(value: unknown): value is OkResult | ErrorResult {
   return typeof value === 'object' && value !== null && sentinel in value
 }
 
+/** @internal Whether a yielded or returned value is an `error()` result. */
+export function isError(value: unknown): value is ErrorResult {
+  return isSentinel(value) && value[sentinel] === 'error'
+}
+
+/** @internal Whether a yielded or returned value is an `ok()` result. */
+export function isOk(value: unknown): value is OkResult {
+  return isSentinel(value) && value[sentinel] === 'ok'
+}
+
 /** @internal Type guard for async generators. */
 function isAsyncGenerator(value: unknown): value is AsyncGenerator<unknown, unknown, unknown> {
   return (

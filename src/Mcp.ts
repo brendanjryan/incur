@@ -150,19 +150,38 @@ export async function callTool(
     const chunks: unknown[] = []
     const progressToken = options.extra?.mcpReq?._meta?.progressToken
     let i = 0
+    let returned: unknown
     try {
-      for await (const chunk of result.stream) {
-        chunks.push(chunk)
+      while (true) {
+        const { done, value } = await result.stream.next()
+        if (done) {
+          returned = value
+          break
+        }
+        if (Command.isError(value)) {
+          await result.stream.return(undefined)
+          return toolFailure(Command.failure(value), options.name ?? tool.name)
+        }
+        chunks.push(value)
         if (progressToken !== undefined && options.sendNotification)
           await options.sendNotification({
             method: 'notifications/progress' as const,
-            params: { progressToken, progress: ++i, message: Json.stringify(chunk) },
+            params: { progressToken, progress: ++i, message: Json.stringify(value) },
           })
       }
     } catch (err) {
       return toolFailure(Command.fromError(err), options.name ?? tool.name)
     }
-    return { content: [{ type: 'text', text: Json.stringify(chunks) }] }
+    if (Command.isError(returned))
+      return toolFailure(Command.failure(returned), options.name ?? tool.name)
+    const cta = Command.isOk(returned)
+      ? formatCtaBlock(options.name ?? tool.name, returned.cta)
+      : undefined
+    const text = Json.stringify(chunks)
+    return {
+      content: [{ type: 'text', text: cta ? `${text}\n\n${renderCtaText(cta)}` : text }],
+      ...(cta ? { _meta: { cta } } : undefined),
+    }
   }
 
   if (!result.ok) return toolFailure(result, options.name ?? tool.name)

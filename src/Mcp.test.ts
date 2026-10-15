@@ -757,6 +757,89 @@ describe('Mcp', () => {
     })
   })
 
+  test.each([
+    {
+      name: 'yielded error()',
+      async *run(c: any) {
+        yield { step: 1 }
+        yield c.error({ code: 'STREAM_ERR', message: 'mid-stream', exitCode: 3 })
+        yield { step: 2 }
+      },
+      result: {
+        content: [{ type: 'text', text: 'mid-stream' }],
+        _meta: { error: { code: 'STREAM_ERR', exitCode: 3 } },
+        isError: true,
+      },
+    },
+    {
+      name: 'returned error()',
+      async *run(c: any) {
+        yield { step: 1 }
+        return c.error({
+          code: 'RET_ERR',
+          message: 'returned',
+          retryable: true,
+          cta: { commands: ['retry'] },
+        })
+      },
+      result: {
+        content: [{ type: 'text', text: 'returned\n\nSuggested command:\n  test-cli retry' }],
+        _meta: {
+          cta: { description: 'Suggested command:', commands: [{ command: 'test-cli retry' }] },
+          error: { code: 'RET_ERR', retryable: true },
+        },
+        isError: true,
+      },
+    },
+    {
+      name: 'returned ok() with cta',
+      async *run(c: any) {
+        yield { step: 1 }
+        return c.ok(undefined, { cta: { commands: ['status'] } })
+      },
+      result: {
+        content: [{ type: 'text', text: '[{"step":1}]\n\nSuggested command:\n  test-cli status' }],
+        _meta: {
+          cta: { description: 'Suggested command:', commands: [{ command: 'test-cli status' }] },
+        },
+      },
+    },
+    {
+      name: 'returned plain value',
+      async *run() {
+        yield { step: 1 }
+        return { ignored: true }
+      },
+      result: { content: [{ type: 'text', text: '[{"step":1}]' }] },
+    },
+  ])('tools/call streaming $name', async (c) => {
+    const commands = new Map<string, any>([['stream', { run: c.run }]])
+    const [, res] = await mcpSession(commands, [
+      { id: 1, method: 'initialize', params: initParams },
+      { id: 2, method: 'tools/call', params: { name: 'stream', arguments: {} } },
+    ])
+    expect(res.result).toEqual(c.result)
+  })
+
+  test('callTool closes a generator that yields error()', async () => {
+    let closed = false
+    const commands = new Map<string, any>()
+    commands.set('stream', {
+      async *run(c: any) {
+        try {
+          yield c.error({ code: 'STOP', message: 'stopped' })
+          yield { unreachable: true }
+        } finally {
+          closed = true
+        }
+      },
+    })
+    const [tool] = Mcp.collectTools(commands, [])
+    const result = await Mcp.callTool(tool!, {})
+    expect(result.isError).toBe(true)
+    expect(closed).toBe(true)
+  })
+
   test('callTool serializes bigint values as strings', async () => {
     const result = await Mcp.callTool(
       {
