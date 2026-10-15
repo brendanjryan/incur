@@ -1174,6 +1174,33 @@ describe('globals', () => {
       expect(result.isError).toBeUndefined()
       expect(JSON.parse(result.content[0].text)).toEqual(expected)
     })
+
+    test('tools/call parses transforming globals once', async () => {
+      const toUrl = vi.fn((value: string) => new URL(value))
+      const result = await callDeploy(
+        discovery,
+        { rpcUrl: 'https://example.com' },
+        {
+          commands: new Map<string, any>([
+            ['deploy', { run: (c: any) => ({ href: c.globals.rpcUrl.href, url: c.var.url }) }],
+          ]),
+          globals: z.object({ rpcUrl: z.string().transform(toUrl) }),
+          middlewares: [
+            async (c: any, next: () => Promise<void>) => {
+              c.set('url', c.globals.rpcUrl instanceof URL)
+              await next()
+            },
+          ],
+          vars: z.object({ url: z.boolean().default(false) }),
+        },
+      )
+      expect(result.isError).toBeUndefined()
+      expect(JSON.parse(result.content[0].text)).toEqual({
+        href: 'https://example.com/',
+        url: true,
+      })
+      expect(toUrl).toHaveBeenCalledOnce()
+    })
   })
 
   test.each([

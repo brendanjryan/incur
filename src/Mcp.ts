@@ -121,6 +121,8 @@ export async function callTool(
     middlewares?: MiddlewareHandler[] | undefined
     env?: z.ZodObject<any> | undefined
     globals?: z.ZodObject<any> | undefined
+    /** Whether `params` were already parsed with the tool's merged input schema, as with direct discovery. Globals are then used as-is instead of being parsed again. */
+    parsed?: boolean | undefined
     vars?: z.ZodObject<any> | undefined
   } = {},
 ): Promise<{
@@ -151,7 +153,7 @@ export async function callTool(
       if (!globalKeys.has(key) || argKeys.has(key)) inputOptions[key] = value
     }
     try {
-      globals = Parser.zodParse(options.globals, rawGlobals)
+      globals = options.parsed ? rawGlobals : Parser.zodParse(options.globals, rawGlobals)
     } catch (error) {
       const { fieldErrors, message } = error as ValidationError
       const text = JSON.stringify({ code: 'VALIDATION_ERROR', message, fieldErrors })
@@ -335,7 +337,8 @@ function registerDirectTool(
       // registerTool passes (args, extra) when inputSchema is set, (extra) when not.
       const params = hasInput ? (callArgs[0] as Record<string, unknown>) : {}
       const extra = hasInput ? callArgs[1] : callArgs[0]
-      return callTool(tool, params, callOptions(options, extra))
+      // The SDK has already parsed `params` with `mergedShape`, so globals are not parsed again.
+      return callTool(tool, params, { ...callOptions(options, extra), parsed: true })
     },
   )
 }
