@@ -2,10 +2,12 @@ import type { McpServer, Transport } from '@modelcontextprotocol/server'
 import type { Readable, Writable } from 'node:stream'
 import { z } from 'zod'
 
+import type { ValidationError } from './Errors.js'
 import * as Command from './internal/command.js'
 import { formatCtaBlock, type FormattedCtaBlock, renderCtaText } from './internal/cta.js'
 import * as Json from './internal/json.js'
 import type { Handler as MiddlewareHandler } from './middleware.js'
+import * as Parser from './Parser.js'
 import * as Schema from './Schema.js'
 
 /** Starts a stdio MCP server that exposes commands as tools. */
@@ -29,6 +31,7 @@ export async function serve(
   registerTools(server, commands, {
     env: options.env,
     fromJsonSchema,
+    globals: options.globals,
     middlewares: options.middlewares,
     name,
     sendNotification: (notification) => server.server.notification(notification),
@@ -81,6 +84,8 @@ export declare namespace serve {
   type Options = {
     /** CLI-level env schema. */
     env?: z.ZodObject<any> | undefined
+    /** CLI-level global options schema. Merged into every tool's input schema and passed to commands and middleware as `globals`. A global wins over a command option of the same name. */
+    globals?: z.ZodObject<any> | undefined
     /** Override input stream. Defaults to `process.stdin`. */
     input?: Readable | undefined
     /** Middleware handlers registered on the root CLI. */
@@ -115,6 +120,7 @@ export async function callTool(
     version?: string | undefined
     middlewares?: MiddlewareHandler[] | undefined
     env?: z.ZodObject<any> | undefined
+    globals?: z.ZodObject<any> | undefined
     vars?: z.ZodObject<any> | undefined
   } = {},
 ): Promise<{
@@ -129,13 +135,35 @@ export async function callTool(
     ...((tool.command.middleware as MiddlewareHandler[] | undefined) ?? []),
   ]
 
+  // Globals share the tool arguments with args and options, so split them out and validate them
+  // before middleware runs. As on the CLI and over HTTP, a global wins over a command option of
+  // the same name.
+  let globals: Record<string, unknown> = {}
+  let inputOptions = params
+  if (options.globals) {
+    const globalKeys = new Set(Object.keys(options.globals.shape))
+    const rawGlobals: Record<string, unknown> = {}
+    inputOptions = {}
+    for (const [key, value] of Object.entries(params))
+      if (globalKeys.has(key)) rawGlobals[key] = value
+      else inputOptions[key] = value
+    try {
+      globals = Parser.zodParse(options.globals, rawGlobals)
+    } catch (error) {
+      const { fieldErrors, message } = error as ValidationError
+      const text = JSON.stringify({ code: 'VALIDATION_ERROR', message, fieldErrors })
+      return { content: [{ type: 'text', text }], isError: true }
+    }
+  }
+
   const result = await Command.execute(tool.command, {
     agent: true,
     argv: [],
     env: options.env,
     format: 'json',
     formatExplicit: true,
-    inputOptions: params,
+    globals,
+    inputOptions,
     middlewares: allMiddleware,
     name: options.name ?? tool.name,
     parseMode: 'flat',
@@ -242,7 +270,7 @@ export function registerTools(
   commands: Map<string, any>,
   options: registerTools.Options,
 ) {
-  const tools = collectTools(commands, [], [], options.tools)
+  const tools = collectTools(commands, [], [], options.tools, options.globals)
   if (tools.length === 0) return
   if ((options.tools?.discovery ?? 'progressive') === 'direct') {
     for (const tool of tools) registerDirectTool(server, tool, options)
@@ -258,6 +286,8 @@ export declare namespace registerTools {
     env?: z.ZodObject<any> | undefined
     /** Converts JSON Schema output definitions for the MCP SDK. */
     fromJsonSchema: typeof import('@modelcontextprotocol/server').fromJsonSchema
+    /** CLI-level global options schema. */
+    globals?: z.ZodObject<any> | undefined
     /** Middleware handlers registered on the root CLI. */
     middlewares?: MiddlewareHandler[] | undefined
     /** MCP server name. */
@@ -283,6 +313,7 @@ function registerDirectTool(
   const mergedShape: Record<string, any> = {
     ...tool.command.args?.shape,
     ...tool.command.options?.shape,
+    ...options.globals?.shape,
   }
   const hasInput = Object.keys(mergedShape).length > 0
 
@@ -433,6 +464,7 @@ function callOptions(options: registerTools.Options, extra: any) {
   return {
     env: options.env,
     extra,
+    globals: options.globals,
     middlewares: options.middlewares,
     name: options.name,
     request: options.request?.(extra),
@@ -486,8 +518,12 @@ export function collectTools(
   prefix: string[],
   parentMiddlewares: MiddlewareHandler[] = [],
   filter?: ToolFilter | undefined,
+  globals?: z.ZodObject<any> | undefined,
 ): ToolEntry[] {
-  const tools = filterTools(collectToolEntries(commands, prefix, parentMiddlewares), filter)
+  const tools = filterTools(
+    collectToolEntries(commands, prefix, parentMiddlewares, globals),
+    filter,
+  )
   assertUniqueToolNames(tools)
   return tools.sort((a, b) => a.name.localeCompare(b.name))
 }
@@ -496,6 +532,7 @@ function collectToolEntries(
   commands: Map<string, any>,
   prefix: string[],
   parentMiddlewares: MiddlewareHandler[] = [],
+  globals?: z.ZodObject<any> | undefined,
 ): ToolEntry[] {
   const result: ToolEntry[] = []
   for (const [name, entry] of commands) {
@@ -508,20 +545,25 @@ function collectToolEntries(
         ...((entry.middlewares as MiddlewareHandler[] | undefined) ?? []),
       ]
       if (entry.root && entry.root.mcp !== false)
-        result.push(toToolEntry(entry.root, path, groupMw))
-      result.push(...collectToolEntries(entry.commands, path, groupMw))
-    } else result.push(toToolEntry(entry, path, parentMiddlewares))
+        result.push(toToolEntry(entry.root, path, groupMw, globals))
+      result.push(...collectToolEntries(entry.commands, path, groupMw, globals))
+    } else result.push(toToolEntry(entry, path, parentMiddlewares, globals))
   }
   return result
 }
 
-function toToolEntry(entry: any, path: string[], middlewares: MiddlewareHandler[]): ToolEntry {
+function toToolEntry(
+  entry: any,
+  path: string[],
+  middlewares: MiddlewareHandler[],
+  globals: z.ZodObject<any> | undefined,
+): ToolEntry {
   const mcp = entry.mcp === false ? undefined : entry.mcp
   const outputSchema = entry.output ? mcpOutputSchema(entry.output) : undefined
   return {
     name: mcp?.name ?? path.join('_'),
     description: mcp?.description ?? entry.description,
-    inputSchema: buildToolSchema(entry.args, entry.options),
+    inputSchema: buildToolSchema(entry.args, entry.options, globals),
     ...(outputSchema ? { outputSchema } : undefined),
     ...(mcp?.annotations ? { annotations: mcp.annotations } : undefined),
     ...(mcp?.instructions ? { instructions: mcp.instructions } : undefined),
@@ -561,15 +603,16 @@ function mcpOutputSchema(output: any): Record<string, unknown> | undefined {
   return undefined
 }
 
-/** @internal Builds a merged JSON Schema from args and options Zod schemas. */
+/** @internal Builds a merged JSON Schema from args, options, and globals Zod schemas. */
 function buildToolSchema(
   args: any | undefined,
   options: any | undefined,
+  globals: z.ZodObject<any> | undefined,
 ): { type: 'object'; properties: Record<string, unknown>; required?: string[] } {
   const properties: Record<string, unknown> = {}
   const required: string[] = []
 
-  for (const schema of [args, options]) {
+  for (const schema of [args, options, globals]) {
     if (!schema) continue
     const json = Schema.toJsonSchema(schema)
     Object.assign(properties, (json.properties as Record<string, unknown>) ?? {})

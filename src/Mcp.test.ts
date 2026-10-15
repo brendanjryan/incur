@@ -1019,3 +1019,166 @@ describe('Mcp', () => {
     expect(tools[0]?.instructions).toBeUndefined()
   })
 })
+
+describe('globals', () => {
+  type Discovery = 'direct' | 'progressive'
+  type SessionOptions = Omit<Mcp.serve.Options, 'input' | 'output'>
+
+  const globals = z.object({
+    network: z.enum(['mainnet', 'testnet']).default('mainnet').describe('Network to use'),
+  })
+
+  const middlewares = [
+    async (c: any, next: () => Promise<void>) => {
+      c.set('network', c.globals.network)
+      await next()
+    },
+  ]
+
+  const vars = z.object({ network: z.string().optional() })
+
+  function deployCommands(
+    options: z.ZodObject<any> = z.object({ force: z.boolean().default(false) }),
+  ) {
+    return new Map<string, any>([
+      [
+        'deploy',
+        {
+          description: 'Deploy the app',
+          options,
+          run: (c: any) => ({ globals: c.globals, middleware: c.var.network, options: c.options }),
+        },
+      ],
+    ])
+  }
+
+  /** Lists the `deploy` tool's input schema the way the discovery mode exposes it. */
+  async function deploySchema(discovery: Discovery, options: SessionOptions = {}) {
+    const request =
+      discovery === 'direct'
+        ? { id: 2, method: 'tools/list', params: {} }
+        : {
+            id: 2,
+            method: 'tools/call',
+            params: { name: 'get_tool_details', arguments: { name: 'deploy' } },
+          }
+    const [, res] = await mcpSession(
+      deployCommands(),
+      [{ id: 1, method: 'initialize', params: initParams }, request],
+      { globals, ...options, tools: { discovery } },
+    )
+    if (discovery === 'direct') return res.result.tools[0].inputSchema
+    return JSON.parse(res.result.content[0].text).inputSchema
+  }
+
+  /** Calls the `deploy` tool the way the discovery mode exposes it. */
+  async function callDeploy(
+    discovery: Discovery,
+    args: Record<string, unknown>,
+    {
+      commands = deployCommands(),
+      ...options
+    }: SessionOptions & { commands?: Map<string, any> | undefined } = {},
+  ) {
+    const params =
+      discovery === 'direct'
+        ? { name: 'deploy', arguments: args }
+        : { name: 'call_write_tool', arguments: { name: 'deploy', arguments: args } }
+    const [, res] = await mcpSession(
+      commands,
+      [
+        { id: 1, method: 'initialize', params: initParams },
+        { id: 2, method: 'tools/call', params },
+      ],
+      { globals, middlewares, vars, ...options, tools: { discovery } },
+    )
+    return res.result
+  }
+
+  describe.each(['direct', 'progressive'] as const)('%s discovery', (discovery) => {
+    test.each([
+      {
+        name: 'include globals',
+        options: {},
+        expected: {
+          force: { type: 'boolean' },
+          network: { description: 'Network to use', enum: ['mainnet', 'testnet'] },
+        },
+      },
+      {
+        name: 'are unchanged without globals',
+        options: { globals: undefined },
+        expected: { force: { type: 'boolean' } },
+      },
+    ])('tool input schemas $name', async ({ options, expected }) => {
+      const schema = await deploySchema(discovery, options)
+      expect(Object.keys(schema.properties)).toEqual(Object.keys(expected))
+      expect(schema.properties).toMatchObject(expected)
+    })
+
+    test.each([
+      {
+        name: 'passes globals to run and middleware',
+        args: { force: true, network: 'testnet' },
+        options: {},
+        expected: {
+          globals: { network: 'testnet' },
+          middleware: 'testnet',
+          options: { force: true },
+        },
+      },
+      {
+        name: 'applies global defaults when omitted',
+        args: {},
+        options: {},
+        expected: {
+          globals: { network: 'mainnet' },
+          middleware: 'mainnet',
+          options: { force: false },
+        },
+      },
+      {
+        name: 'prefers a global over a command option of the same name',
+        args: { network: 'testnet' },
+        options: { commands: deployCommands(z.object({ network: z.string().default('option') })) },
+        expected: {
+          globals: { network: 'testnet' },
+          middleware: 'testnet',
+          options: { network: 'option' },
+        },
+      },
+      {
+        name: 'leaves calls unchanged without globals',
+        args: { force: true, network: 'testnet' },
+        options: { globals: undefined },
+        expected: { globals: {}, options: { force: true } },
+      },
+    ])('tools/call $name', async ({ args, options, expected }) => {
+      const result = await callDeploy(discovery, args, options)
+      expect(result.isError).toBeUndefined()
+      expect(JSON.parse(result.content[0].text)).toEqual(expected)
+    })
+  })
+
+  test.each([
+    { discovery: 'direct' as const, text: /^Input validation error: .* network: Invalid option/ },
+    { discovery: 'progressive' as const, text: /^\{"code":"VALIDATION_ERROR",.*"path":"network"/ },
+  ])('$discovery tools/call rejects invalid global values', async ({ discovery, text }) => {
+    const result = await callDeploy(discovery, { network: 'devnet' })
+    expect(result.isError).toBe(true)
+    expect(result.content[0].text).toMatch(text)
+  })
+
+  test('callTool validates globals before middleware runs', async () => {
+    const middleware = vi.fn(async (_c: any, next: () => Promise<void>) => next())
+    const [tool] = Mcp.collectTools(deployCommands(), [])
+    const options = { globals, middlewares: [middleware] }
+    const result = await Mcp.callTool(tool!, { network: 'devnet' }, options)
+    expect(middleware).not.toHaveBeenCalled()
+    expect(result.isError).toBe(true)
+    expect(JSON.parse(result.content[0]!.text)).toMatchObject({
+      code: 'VALIDATION_ERROR',
+      fieldErrors: [{ code: 'invalid_value', missing: false, path: 'network' }],
+    })
+  })
+})
