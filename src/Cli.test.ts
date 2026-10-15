@@ -7619,7 +7619,7 @@ describe('globals', () => {
     expect(output).toContain('limit: 5')
   })
 
-  test.each(['format', 'incurBinaryApply'])(
+  test.each(['format', 'fullOutput', 'incurBinaryApply'])(
     'global %s conflicts with builtins at create() time',
     (name) => {
       expect(() =>
@@ -7629,6 +7629,15 @@ describe('globals', () => {
       ).toThrow(/conflicts with a built-in flag/)
     },
   )
+
+  test('global verbose is parsed as a custom global', async () => {
+    const cli = Cli.create('test', {
+      globals: z.object({ verbose: z.boolean().default(false) }),
+    }).command('ping', { run: (c) => ({ verbose: c.globals.verbose }) })
+
+    const { output } = await serve(cli, ['--verbose', 'ping', '--json'])
+    expect(JSON.parse(output)).toEqual({ verbose: true })
+  })
 
   test('command option conflicting with global errors at command() time', () => {
     const cli = Cli.create('test', {
