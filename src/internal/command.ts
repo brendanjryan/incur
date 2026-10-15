@@ -23,11 +23,17 @@ type OkResult = {
 
 /** @internal Options for the `error()` context helper. A thrown `IncurError` carries the same fields. */
 export type ErrorOptions = {
+  /** Machine-readable error code (e.g. `'NOT_AUTHENTICATED'`). */
   code: string
+  /** Suggested commands to run next. */
   cta?: CtaBlock | undefined
+  /** Process exit code. Defaults to `1`. */
   exitCode?: number | undefined
+  /** Actionable hint for the user. */
   hint?: string | undefined
+  /** Human-readable error message. */
   message: string
+  /** Whether the operation can be retried. */
   retryable?: boolean | undefined
 }
 
@@ -299,15 +305,24 @@ export declare namespace execute {
 
   /** A failed command result, from a returned `error()` or a thrown error. */
   type Failure = {
+    /** Whether the command succeeded. Always `false`. */
     ok: false
+    /** Error details, rendered as the `error` of the output envelope. */
     error: {
+      /** Machine-readable error code. */
       code: string
+      /** Human-readable error message. */
       message: string
+      /** Actionable hint for the user. */
       hint?: string | undefined
+      /** Whether the operation can be retried. */
       retryable?: boolean | undefined
+      /** Per-field validation errors. */
       fieldErrors?: FieldError[] | undefined
     }
+    /** Suggested commands to run next, before the CLI name is prefixed. */
     cta?: CtaBlock | undefined
+    /** Process exit code. Defaults to `1`. */
     exitCode?: number | undefined
   }
 
